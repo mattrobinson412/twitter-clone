@@ -4,8 +4,8 @@ from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
-from models import db, connect_db, User, Message
+from forms import UserAddForm, LoginForm, MessageForm, UserEditForm
+from models import db, connect_db, User, Message, Likes
 
 CURR_USER_KEY = "curr_user"
 
@@ -18,7 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
 toolbar = DebugToolbarExtension(app)
 
@@ -114,6 +114,10 @@ def logout():
     """Handle logout of user."""
 
     # IMPLEMENT THIS
+    session.pop(CURR_USER_KEY)
+    flash("Successful logout! Come back soon!", 'success')
+    return redirect("/login")
+
 
 
 ##############################################################################
@@ -212,6 +216,39 @@ def profile():
     """Update profile for current user."""
 
     # IMPLEMENT THIS
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    else:
+        user = User.query.get(g.user.id)
+        form = UserEditForm(obj=user)
+
+        if form.validate_on_submit():
+            username = form.username.data
+            email = form.email.data
+            bio = form.bio.data
+            location = form.location.data
+            image_url = form.image_url.data
+            header_image_url = form.header_image_url.data
+            password = form.password.data
+
+            user.username = username
+            user.email = email
+            user.bio = bio
+            user.location = location
+            user.image_url = image_url
+            user.header_image_url = header_image_url
+            user.password = password
+            db.session.commit()
+            return redirect(f"/users/{g.user.id}")
+
+        else:
+            return render_template('users/edit.html', form=form)
+    
+        return render_template('users/edit.html', form=form)
+    
+
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -278,6 +315,45 @@ def messages_destroy(message_id):
 
     return redirect(f"/users/{g.user.id}")
 
+##############################################################################
+# Likes routes
+
+@app.route('/users/add_like/<msg_id>', methods=["POST"])
+def add_like(msg_id):
+    """Adds a like to a message by a user from current user."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
+    like = Likes(user_id=g.user.id,
+                message_id=msg_id)
+    db.session.add(like)
+    db.session.commit()
+    return redirect(f"/messages/{msg_id}")
+
+
+@app.route('/users/remove_like/<msg_id>', methods=["POST"])
+def remove_like(msg_id):
+    """Removes a like to a message by a user from curent user."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    Likes.query.filter(Likes.message_id == msg_id).delete()
+    db.session.commit()
+    return redirect (f"/messages/{msg_id}")
+
+
+@app.route('/users/<user_id>/likes')
+def show_liked_warbles(user_id):
+    """Shows a page with every warble liked by a user."""
+
+    user = User.query.get(user_id)
+    return render_template("users/likes.html", user=user)
+
+
 
 ##############################################################################
 # Homepage and error pages
@@ -292,8 +368,11 @@ def homepage():
     """
 
     if g.user:
+        following_ids = [f.id for f in g.user.following] + [g.user.id]
+
         messages = (Message
                     .query
+                    .filter(Message.user_id.in_(following_ids))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())

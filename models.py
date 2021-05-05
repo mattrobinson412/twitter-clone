@@ -94,7 +94,7 @@ class User(db.Model):
         nullable=False,
     )
 
-    messages = db.relationship('Message')
+    messages = db.relationship('Message', backref="user")
 
     followers = db.relationship(
         "User",
@@ -129,6 +129,7 @@ class User(db.Model):
 
         found_user_list = [user for user in self.following if user == other_user]
         return len(found_user_list) == 1
+
 
     @classmethod
     def signup(cls, username, email, password, image_url):
@@ -168,7 +169,7 @@ class User(db.Model):
                 return user
 
         return False
-
+    
 
 class Message(db.Model):
     """An individual message ("warble")."""
@@ -197,7 +198,11 @@ class Message(db.Model):
         nullable=False,
     )
 
-    user = db.relationship('User')
+    likes = db.relationship(
+        'Likes',
+        backref="message"
+    )
+
 
 
 def connect_db(app):
