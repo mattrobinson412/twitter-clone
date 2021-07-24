@@ -44,9 +44,9 @@ class Likes(db.Model):
 
     message_id = db.Column(
         db.Integer,
-        db.ForeignKey('messages.id', ondelete='cascade'),
-        unique=True
+        db.ForeignKey('messages.id', ondelete='cascade')
     )
+
 
 
 class User(db.Model):
@@ -94,7 +94,7 @@ class User(db.Model):
         nullable=False,
     )
 
-    messages = db.relationship('Message', backref="user")
+    messages = db.relationship('Message')
 
     followers = db.relationship(
         "User",
@@ -129,7 +129,6 @@ class User(db.Model):
 
         found_user_list = [user for user in self.following if user == other_user]
         return len(found_user_list) == 1
-
 
     @classmethod
     def signup(cls, username, email, password, image_url):
@@ -169,7 +168,7 @@ class User(db.Model):
                 return user
 
         return False
-    
+
 
 class Message(db.Model):
     """An individual message ("warble")."""
@@ -198,11 +197,7 @@ class Message(db.Model):
         nullable=False,
     )
 
-    likes = db.relationship(
-        'Likes',
-        backref="message"
-    )
-
+    user = db.relationship('User')
 
 
 def connect_db(app):

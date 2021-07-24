@@ -1,11 +1,11 @@
 import os
 
-from flask import Flask, render_template, request, flash, redirect, session, g
+from flask import Flask, render_template, request, flash, redirect, session, g, abort
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm, UserEditForm
-from models import db, connect_db, User, Message, Likes
+from forms import UserAddForm, UserEditForm, LoginForm, MessageForm
+from models import db, connect_db, User, Message
 
 CURR_USER_KEY = "curr_user"
 
@@ -18,7 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
 toolbar = DebugToolbarExtension(app)
 
@@ -64,7 +64,8 @@ def signup():
     If the there already is a user with that username: flash message
     and re-present form.
     """
-
+    if CURR_USER_KEY in session:
+        del session[CURR_USER_KEY]
     form = UserAddForm()
 
     if form.validate_on_submit():
@@ -77,7 +78,7 @@ def signup():
             )
             db.session.commit()
 
-        except IntegrityError:
+        except IntegrityError as e:
             flash("Username already taken", 'danger')
             return render_template('users/signup.html', form=form)
 
@@ -113,11 +114,10 @@ def login():
 def logout():
     """Handle logout of user."""
 
-    # IMPLEMENT THIS
-    session.pop(CURR_USER_KEY)
-    flash("Successful logout! Come back soon!", 'success')
-    return redirect("/login")
+    do_logout()
 
+    flash("You have successfully logged out.", 'success')
+    return redirect("/login")
 
 
 ##############################################################################
@@ -145,7 +145,6 @@ def users_show(user_id):
     """Show user profile."""
 
     user = User.query.get_or_404(user_id)
-
     # snagging messages in order from the database;
     # user.messages won't be in order by default
     messages = (Message
@@ -154,7 +153,8 @@ def users_show(user_id):
                 .order_by(Message.timestamp.desc())
                 .limit(100)
                 .all())
-    return render_template('users/show.html', user=user, messages=messages)
+    likes = [message.id for message in user.likes]
+    return render_template('users/show.html', user=user, messages=messages, likes=likes)
 
 
 @app.route('/users/<int:user_id>/following')
@@ -210,45 +210,65 @@ def stop_following(follow_id):
 
     return redirect(f"/users/{g.user.id}/following")
 
-
-@app.route('/users/profile', methods=["GET", "POST"])
-def profile():
-    """Update profile for current user."""
-
-    # IMPLEMENT THIS
+@app.route('/users/<int:user_id>/likes', methods=["GET"])
+def show_likes(user_id):
     if not g.user:
         flash("Access unauthorized.", "danger")
         return redirect("/")
-    
+
+    user = User.query.get_or_404(user_id)
+    return render_template('users/likes.html', user=user, likes=user.likes)
+
+
+@app.route('/messages/<int:message_id>/like', methods=['POST'])
+def add_like(message_id):
+    """Toggle a liked message for the currently-logged-in user."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
+    liked_message = Message.query.get_or_404(message_id)
+    if liked_message.user_id == g.user.id:
+        return abort(403)
+
+    user_likes = g.user.likes
+
+    if liked_message in user_likes:
+        g.user.likes = [like for like in user_likes if like != liked_message]
     else:
-        user = User.query.get(g.user.id)
-        form = UserEditForm(obj=user)
+        g.user.likes.append(liked_message)
 
-        if form.validate_on_submit():
-            username = form.username.data
-            email = form.email.data
-            bio = form.bio.data
-            location = form.location.data
-            image_url = form.image_url.data
-            header_image_url = form.header_image_url.data
-            password = form.password.data
+    db.session.commit()
 
-            user.username = username
-            user.email = email
-            user.bio = bio
-            user.location = location
-            user.image_url = image_url
-            user.header_image_url = header_image_url
-            user.password = password
+    return redirect("/")
+
+
+@app.route('/users/profile', methods=["GET", "POST"])
+def edit_profile():
+    """Update profile for current user."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
+    user = g.user
+    form = UserEditForm(obj=user)
+
+    if form.validate_on_submit():
+        if User.authenticate(user.username, form.password.data):
+            user.username = form.username.data
+            user.email = form.email.data
+            user.image_url = form.image_url.data or "/static/images/default-pic.png"
+            user.header_image_url = form.header_image_url.data or "/static/images/warbler-hero.jpg"
+            user.bio = form.bio.data
+
             db.session.commit()
-            return redirect(f"/users/{g.user.id}")
+            return redirect(f"/users/{user.id}")
 
-        else:
-            return render_template('users/edit.html', form=form)
-    
-        return render_template('users/edit.html', form=form)
-    
+        flash("Wrong password, please try again.", 'danger')
 
+    return render_template('users/edit.html', form=form, user_id=user.id)
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -297,7 +317,7 @@ def messages_add():
 def messages_show(message_id):
     """Show a message."""
 
-    msg = Message.query.get(message_id)
+    msg = Message.query.get_or_404(message_id)
     return render_template('messages/show.html', message=msg)
 
 
@@ -309,50 +329,15 @@ def messages_destroy(message_id):
         flash("Access unauthorized.", "danger")
         return redirect("/")
 
-    msg = Message.query.get(message_id)
+    msg = Message.query.get_or_404(message_id)
+    if msg.user_id != g.user.id:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
     db.session.delete(msg)
     db.session.commit()
 
     return redirect(f"/users/{g.user.id}")
-
-##############################################################################
-# Likes routes
-
-@app.route('/users/add_like/<msg_id>', methods=["POST"])
-def add_like(msg_id):
-    """Adds a like to a message by a user from current user."""
-
-    if not g.user:
-        flash("Access unauthorized.", "danger")
-        return redirect("/")
-
-    like = Likes(user_id=g.user.id,
-                message_id=msg_id)
-    db.session.add(like)
-    db.session.commit()
-    return redirect(f"/messages/{msg_id}")
-
-
-@app.route('/users/remove_like/<msg_id>', methods=["POST"])
-def remove_like(msg_id):
-    """Removes a like to a message by a user from curent user."""
-
-    if not g.user:
-        flash("Access unauthorized.", "danger")
-        return redirect("/")
-    
-    Likes.query.filter(Likes.message_id == msg_id).delete()
-    db.session.commit()
-    return redirect (f"/messages/{msg_id}")
-
-
-@app.route('/users/<user_id>/likes')
-def show_liked_warbles(user_id):
-    """Shows a page with every warble liked by a user."""
-
-    user = User.query.get(user_id)
-    return render_template("users/likes.html", user=user)
-
 
 
 ##############################################################################
@@ -377,10 +362,19 @@ def homepage():
                     .limit(100)
                     .all())
 
-        return render_template('home.html', messages=messages)
+        liked_msg_ids = [msg.id for msg in g.user.likes]
+
+        return render_template('home.html', messages=messages, likes=liked_msg_ids)
 
     else:
         return render_template('home-anon.html')
+
+
+@app.errorhandler(404)
+def page_not_found(e):
+    """404 NOT FOUND page."""
+
+    return render_template('404.html'), 404
 
 
 ##############################################################################

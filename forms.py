@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, TextAreaField
-from wtforms.validators import DataRequired, Email, Length, Optional
+from wtforms.validators import DataRequired, Email, Length
 
 
 class MessageForm(FlaskForm):
@@ -18,22 +18,19 @@ class UserAddForm(FlaskForm):
     image_url = StringField('(Optional) Image URL')
 
 
+class UserEditForm(FlaskForm):
+    """Form for editing users."""
+
+    username = StringField('Username', validators=[DataRequired()])
+    email = StringField('E-mail', validators=[DataRequired(), Email()])
+    image_url = StringField('(Optional) Image URL')
+    header_image_url = StringField('(Optional) Header Image URL')
+    bio = TextAreaField('(Optional) Tell us about yourself')
+    password = PasswordField('Password', validators=[Length(min=6)])
+
+
 class LoginForm(FlaskForm):
     """Login form."""
 
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[Length(min=6)])
-
-
-class UserEditForm(FlaskForm):
-    """Form for editing users."""
-    
-    username = StringField('Username', validators=[Optional()])
-    email = StringField('E-mail', validators=[Optional(), Email()])
-    bio = TextAreaField('Bio', validators=[Optional()])
-    location = StringField('Location', validators=[Optional()])
-    image_url = StringField('(Optional) Image URL')
-    header_image_url = StringField('(Optional) Image URL')
-    password = PasswordField('Password', validators=[Length(min=6)])
-
-

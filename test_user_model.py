@@ -7,6 +7,7 @@
 
 import os
 from unittest import TestCase
+from sqlalchemy import exc
 
 from models import db, User, Message, Follows
 
@@ -167,4 +168,13 @@ class UserModelTestCase(TestCase):
     def test_wrong_password(self):
         self.assertFalse(User.authenticate(self.u1.username, "badpassword"))
 
+
+
+
         
+
+
+
+
+        
+
